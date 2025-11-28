@@ -1,0 +1,394 @@
+// ============================================
+// TravelHub - Tours & Holidays Chatbot
+// Zoho SalesIQ Bot - Cliqtrix 2025
+// ============================================
+
+// Main Bot Initialization Handler
+void zobot_initiate(Map zobot_initiate_input)
+{
+  Map user_input = zobot_initiate_input.get("input");
+  String message = user_input.get("message");
+  
+  // Send welcome message
+  zobot_sendMessage({
+    "text": "Welcome to TravelHub! I'm your personal travel assistant powered by AI. How can I help you today?"
+  });
+  
+  // Display main menu options
+  showMainMenu();
+}
+
+// Main Menu Handler
+void showMainMenu()
+{
+  zobot_sendMessage({
+    "text": "What would you like to explore?",
+    "buttons": {
+      {"text": "Featured Packages", "action": "featured_packages"},
+      {"text": "Find a Package", "action": "find_package"},
+      {"text": "My Bookings", "action": "my_packages"}
+    }
+  });
+}
+
+// Featured Packages Handler
+void fetchFeaturedPackages()
+{
+  try
+  {
+    // Fetch from external CRM API
+    Map crm_headers = {"Authorization": "Bearer YOUR_CRM_API_KEY"};
+    Map response = invokeurl
+    [
+      url: "https://api.your-crm.com/packages?featured=true"
+      type: GET
+      headers: crm_headers
+    ];
+    
+    List packages = response.get("data");
+    
+    if(packages.size() > 0)
+    {
+      displayPackages(packages, "featured");
+    }
+    else
+    {
+      zobot_sendMessage({"text": "No featured packages available at the moment."});
+    }
+  }
+  catch(Exception e)
+  {
+    zobot_sendMessage({"text": "Error fetching packages. Please try again."});
+  }
+}
+
+// Display Packages in Carousel
+void displayPackages(List packages, String type)
+{
+  List carousel_items = {};
+  
+  for each pkg in packages
+  {
+    Map item = {
+      "title": pkg.get("name"),
+      "description": pkg.get("description"),
+      "image": pkg.get("image_url"),
+      "price": "$" + pkg.get("price"),
+      "action": "package_details",
+      "package_id": pkg.get("id"),
+      "duration": pkg.get("duration") + " days"
+    };
+    carousel_items.add(item);
+  }
+  
+  zobot_sendMessage({
+    "text": "Explore our amazing travel packages:",
+    "carousel": carousel_items,
+    "action_button": "Get Details"
+  });
+}
+
+// Collect Visitor Information with OTP
+void collectVisitorInfoWithOTP(String package_id)
+{
+  zobot_sendMessage({"text": "Please share your details to proceed with the booking."});
+  
+  // Collect name
+  zobot_sendMessage({"text": "What's your name?"});
+  String visitor_name = waitForUserInput();
+  
+  // Collect email
+  zobot_sendMessage({"text": "What's your email address?"});
+  String visitor_email = waitForUserInput();
+  
+  // Collect phone
+  zobot_sendMessage({"text": "What's your phone number?"});
+  String phone_number = waitForUserInput();
+  
+  // Send OTP
+  String otp = sendOTP(phone_number);
+  zobot_sendMessage({"text": "We've sent an OTP to your phone. Please enter it to verify."});
+  String otp_input = waitForUserInput();
+  
+  if(otp_input == otp)
+  {
+    zobot_sendMessage({"text": "✓ Phone verified! Creating your lead..."});
+    createLeadInCRM(visitor_name, visitor_email, phone_number, package_id);
+  }
+  else
+  {
+    zobot_sendMessage({"text": "OTP verification failed. Please try again."});
+  }
+}
+
+// Send OTP via Twilio
+String sendOTP(String phone_number)
+{
+  String otp_code = rand(100000, 999999).toString();
+  
+  Map twilio_auth = base64Encode("TWILIO_SID:TWILIO_TOKEN");
+  
+  try
+  {
+    invokeurl
+    [
+      url: "https://api.twilio.com/2010-04-01/Accounts/YOUR_SID/Messages.json"
+      type: POST
+      headers: {"Authorization": "Basic " + twilio_auth}
+      parameters: {
+        "From": "+1234567890",
+        "To": phone_number,
+        "Body": "Your TravelHub OTP is: " + otp_code
+      }
+    ];
+  }
+  catch(Exception e)
+  {
+    info "OTP send failed: " + e.getMessage();
+  }
+  
+  return otp_code;
+}
+
+// Create Lead in External CRM
+void createLeadInCRM(String name, String email, String phone, String package_id)
+{
+  Map lead_data = {
+    "name": name,
+    "email": email,
+    "phone": phone,
+    "package_selected": package_id,
+    "source": "SalesIQ Bot",
+    "created_date": now
+  };
+  
+  Map crm_headers = {
+    "Authorization": "Bearer YOUR_CRM_API_KEY",
+    "Content-Type": "application/json"
+  };
+  
+  try
+  {
+    invokeurl
+    [
+      url: "https://api.your-crm.com/leads"
+      type: POST
+      headers: crm_headers
+      content: lead_data
+    ];
+    
+    zobot_sendMessage({"text": "✓ Your inquiry has been recorded. We'll contact you soon!"});
+  }
+  catch(Exception e)
+  {
+    zobot_sendMessage({"text": "Error creating lead. Please try again."});
+  }
+}
+
+// Find Package with AI Recommendations
+void findPackageFlow()
+{
+  zobot_sendMessage({"text": "Let's find your perfect vacation!"});
+  
+  zobot_sendMessage({"text": "Where would you like to travel? (e.g., Paris, Bali, Tokyo, Dubai)"});
+  String location = waitForUserInput();
+  
+  zobot_sendMessage({"text": "What's your budget? (e.g., $500-1000, $1000-2000, $2000+)"});
+  String budget = waitForUserInput();
+  
+  zobot_sendMessage({"text": "How many days? (e.g., 3, 5, 7, 10)"});
+  String duration = waitForUserInput();
+  
+  // Query CRM for matching packages
+  List matching_packages = queryPackagesByCriteria(location, budget, duration);
+  
+  if(matching_packages.size() > 0)
+  {
+    displayPackages(matching_packages, "search_results");
+  }
+  else
+  {
+    zobot_sendMessage({"text": "Sorry, we couldn't find packages matching your criteria. Please try different preferences."});
+    showMainMenu();
+  }
+}
+
+// Query CRM for Matching Packages
+List queryPackagesByCriteria(String location, String budget, String duration)
+{
+  Map query_params = {
+    "destination": location,
+    "price_range": budget,
+    "duration_days": duration
+  };
+  
+  Map crm_headers = {"Authorization": "Bearer YOUR_CRM_API_KEY"};
+  
+  try
+  {
+    Map response = invokeurl
+    [
+      url: "https://api.your-crm.com/packages/search"
+      type: POST
+      headers: crm_headers
+      content: query_params
+    ];
+    
+    return response.get("packages");
+  }
+  catch(Exception e)
+  {
+    return {};
+  }
+}
+
+// My Packages / Booking History
+void myPackagesFlow(String visitor_email)
+{
+  try
+  {
+    Map crm_headers = {"Authorization": "Bearer YOUR_CRM_API_KEY"};
+    
+    Map response = invokeurl
+    [
+      url: "https://api.your-crm.com/bookings?email=" + visitor_email
+      type: GET
+      headers: crm_headers
+    ];
+    
+    List bookings = response.get("bookings");
+    
+    if(bookings.size() > 0)
+    {
+      zobot_sendMessage({"text": "Here are your previous bookings:"});
+      
+      for each booking in bookings
+      {
+        zobot_sendMessage({
+          "text": booking.get("package_name") + " - " + booking.get("travel_date"),
+          "buttons": {
+            {"text": "Leave Feedback", "action": "feedback_" + booking.get("id")},
+            {"text": "Book Again", "action": "rebook_" + booking.get("id")}
+          }
+        });
+      }
+    }
+    else
+    {
+      zobot_sendMessage({"text": "You don't have any bookings yet. Let's explore packages!"});
+      findPackageFlow();
+    }
+  }
+  catch(Exception e)
+  {
+    zobot_sendMessage({"text": "Error fetching your bookings. Please try again."});
+  }
+}
+
+// Feedback Collection
+void collectFeedback(String booking_id)
+{
+  zobot_sendMessage({"text": "How was your experience? (1-5 stars)"});
+  String rating = waitForUserInput();
+  
+  zobot_sendMessage({"text": "Any additional comments?"});
+  String comments = waitForUserInput();
+  
+  Map feedback_data = {
+    "booking_id": booking_id,
+    "rating": rating,
+    "comments": comments,
+    "submitted_date": now
+  };
+  
+  Map crm_headers = {"Authorization": "Bearer YOUR_CRM_API_KEY"};
+  
+  try
+  {
+    invokeurl
+    [
+      url: "https://api.your-crm.com/feedback"
+      type: POST
+      headers: crm_headers
+      content: feedback_data
+    ];
+    
+    zobot_sendMessage({"text": "✓ Thank you for your feedback!"});
+  }
+  catch(Exception e)
+  {
+    zobot_sendMessage({"text": "Error submitting feedback. Please try again."});
+  }
+}
+
+// Generate Invoice and Initiate Payment
+void proceedToPayment(String package_id, String visitor_email)
+{
+  try
+  {
+    Map pkg = getPackageDetails(package_id);
+    
+    // Generate invoice
+    String invoice_id = "INV-" + uuid().toString();
+    
+    // Initiate Stripe payment
+    Map stripe_headers = {"Authorization": "Bearer " + getStripeSecretKey()};
+    
+    Map payment_response = invokeurl
+    [
+      url: "https://api.stripe.com/v1/payment_intents"
+      type: POST
+      headers: stripe_headers
+      parameters: {
+        "amount": pkg.get("price") * 100,  // Amount in cents
+        "currency": "usd",
+        "metadata[invoice_id]": invoice_id,
+        "metadata[package_id]": package_id
+      }
+    ];
+    
+    String payment_intent = payment_response.get("id");
+    
+    zobot_sendMessage({
+      "text": "Proceeding to payment. Click below to complete your booking:",
+      "buttons": {{
+        "text": "Pay Now",
+        "url": "https://your-domain.com/pay/" + payment_intent
+      }}
+    });
+  }
+  catch(Exception e)
+  {
+    zobot_sendMessage({"text": "Error processing payment. Please try again."});
+  }
+}
+
+// Helper: Get Package Details
+Map getPackageDetails(String package_id)
+{
+  Map crm_headers = {"Authorization": "Bearer YOUR_CRM_API_KEY"};
+  
+  Map response = invokeurl
+  [
+    url: "https://api.your-crm.com/packages/" + package_id
+    type: GET
+    headers: crm_headers
+  ];
+  
+  return response;
+}
+
+// Helper: Get Stripe Secret Key (from secure storage)
+String getStripeSecretKey()
+{
+  return "sk_test_YOUR_STRIPE_KEY";
+}
+
+// ============================================
+// Configuration
+// ============================================
+// Replace the following with your actual API credentials:
+// - YOUR_CRM_API_KEY: External CRM API key
+// - YOUR_SID, TWILIO_TOKEN: Twilio credentials
+// - YOUR_STRIPE_KEY: Stripe API key
+// ============================================
